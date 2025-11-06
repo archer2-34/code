@@ -1,0 +1,327 @@
+########Diffbind annotation
+library(ggplot2)
+library(dplyr)
+library(DiffBind)
+library(rtracklayer)  
+library(ChIPseeker)  
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+
+tamoxifen <- dba(sampleSheet="samplesheet_kmt2b-293t.csv")  
+plot(tamoxifen)
+blacklist <- import("GRCh38_unified_blacklist.bed")
+tamoxifen <- dba.blacklist(tamoxifen, blacklist = blacklist, greylist = FALSE)  
+tamoxifen <- dba.count(tamoxifen,summits = 500)  
+
+plot(tamoxifen)
+
+dba.show(tamoxifen) 
+tamoxifen <- dba.normalize(tamoxifen)
+tamoxifen <- dba.contrast(tamoxifen, minMembers = 2)  
+tamoxifen
+
+tamoxifen <- dba.analyze(tamoxifen, method=DBA_ALL_METHODS)  
+dba.show(tamoxifen , bContrasts = TRUE)  
+comp1.edgeR <- dba.report(tamoxifen, method=DBA_EDGER, contrast = 1, th=1)
+
+peaks <- GRanges(seqnames = all_DEG$seqnames,  
+                 ranges = IRanges(start = all_DEG$start, end = all_DEG$end)) 
+peak_annotation <- annotatePeak(peaks, tssRegion=c(-3000, 3000), TxDb=TxDb.Hsapiens.UCSC.hg38.knownGene)  
+print(peak_annotation)  
+plotAnnoPie(peak_annotation)  
+annotation_df <- as.data.frame(peak_annotation)  
+merged_data <- merge(all_DEG, annotation_df,   
+                     by.x = c("seqnames", "start", "end"),   
+                     by.y = c("seqnames", "start", "end"),   
+                     all = FALSE)  # all = FALSE 表示只保留共有的行  
+
+print(merged_data)    
+
+
+
+############deseq rna volcano analysis
+counts <- read.csv(".csv", row.names = 1,header=T)  
+counts <- counts[rowMeans(counts)>1,]  
+
+coldata <- read.csv("样本信息.csv", row.names = 1)  
+
+all(rownames(coldata) == colnames(counts)) 
+
+library(DESeq2)  
+any(is.na(counts)) 
+which(is.na(counts), arr.ind = TRUE)  
+counts[is.na(counts)] <- 0 
+str(coldata)  
+
+coldata$condition <- factor(coldata$condition)  
+coldata$condition <- factor(coldata$condition, levels = c("control", "treatment1", "treatment2","treatment3"))
+str(coldata)  
+
+dds <- DESeqDataSetFromMatrix(countData = counts, colData = coldata, design = ~ condition)  
+dds <- DESeq(dds)  
+
+res_treatment2_vs_control <- results(dds, contrast = c("condition", "treatment2", "control")) 
+res_treatment1_vs_control <- results(dds, contrast = c("condition", "treatment1", "control"))
+res_treatment3_vs_control <- results(dds, contrast = c("condition", "treatment3", "control"))
+
+head(res_treatment3_vs_control)  
+head(res_treatment1_vs_control)  
+head(res_treatment2_vs_control)  
+
+res_df <- as.data.frame(res_treatment2_vs_control)  
+print(res_df[505859, ])  
+counts(dds, normalized = TRUE) 
+
+up_data <- read.csv("1.5_0.05fdr/KMT2B与293Tup_regulated_proteins_1.5_FDR0.05.csv")  
+down_data <- read.csv("1.5_0.05fdr/KMT2B与293Tdown_regulated_proteins_1.5_FDR0.05.csv")  
+data$regulate <- "Unchange"  
+
+for (i in 1:nrow(up_data)) {  
+  if (up_data$gene_name[i] %in% data$X) {  
+    data$regulate[data$X == up_data$gene_name[i]] <- "UP"  
+  }  
+}  
+for (i in 1:nrow(down_data)) {  
+  if (down_data$gene_name[i] %in% data$X && data$regulate[data$X == down_data$gene_name[i]] == "Unchange") {  
+    data$regulate[data$X == down_data$gene_name[i]] <- "DOWN"  
+  }  
+}  
+table(data$regulate)
+library(ggplot2)  
+p <- ggplot(data, aes(x = HEK293T, y = sgKMT2B, color = regulate)) +  
+  geom_point(aes(alpha = ifelse(regulate == "Unchange", 0.5, 1))) +  # 调整透明度  
+  scale_color_manual(values = c(  
+    "UP" = "#cc0000",        
+    "DOWN" = "#2f5688",      
+    "Unchange" = "#BBBBBB"  
+  )) +  
+  scale_alpha_identity() +  
+  labs(  
+    title = "HEK293T vs sgKMT2B",  
+    x = "Log2(Tpm+1) HEK293T",  
+    y = "Log2(Tpm+1) sgKMT2B",  
+    color = "Regulate"  
+  ) +  
+  theme_bw() +    
+  theme(  
+    panel.grid.major = element_blank(),    
+    panel.grid.minor = element_blank()    
+  )    
+print(p)
+
+
+
+
+
+########DIA analysis
+library(devtools)
+library(diann)
+library(diann)
+df <- diann_load("G:/kdm课题ms数据/20241203/DIANN/report.tsv")
+precursors <- diann_matrix(df, pg.q = 0.01)
+peptides <- diann_matrix(df, id.header="Stripped.Sequence", pg.q = 0.01)
+
+peptides.maxlfq <- diann_maxlfq(df[df$Q.Value <= 0.01 & df$PG.Q.Value <= 0.01,], group.header="Stripped.Sequence", id.header = "Precursor.Id", quantity.header = "Precursor.Normalised")
+
+unique.genes <- diann_matrix(df, id.header="Genes", quantity.header="Genes.MaxLFQ.Unique", proteotypic.only = T, pg.q = 0.01)
+
+protein.groups <- diann_maxlfq(df[df$Q.Value <= 0.01 & df$PG.Q.Value <= 0.01,], group.header="Protein.Group", id.header = "Precursor.Id", quantity.header = "Precursor.Normalised")
+
+colnames(protein.groups )=c("293T1","293T2","293T3","2b1","2b2","2b3","5c1","5c2","5c3","6a1","6a2","6a3")
+
+setwd("E:/kdm课题ms数据/20241203/DIANN")
+
+df <- read.delim('正确normolizedDIA-5C-2B数据.csv',sep = ",")  
+
+df1 <- read.delim("E:/20250120/report.tsv")
+
+df_selected <- df1[, c(3, 6)]   
+
+df_selected_unique <- unique(df_selected)  
+
+head(df_selected_unique) 
+
+
+library(limma)
+library(dplyr)
+library(readxl)
+df <- read.csv("KDM6A_DIAnormalized数据.csv",header = T,sep = ",")
+newdata<-df
+dNAdata=na.omit(newdata)
+dNAdata_unique <- dNAdata %>% distinct(Genes, .keep_all = TRUE)
+
+rownames(dNAdata_unique) <- dNAdata_unique[, 1]
+
+dNAdata_unique<- dNAdata_unique[, -1]
+dNAdata_unique = log2(dNAdata_unique)
+dNAdata_unique[dNAdata_unique == -Inf] = 0 
+dNAdata1 <- dNAdata_unique[rowSums(dNAdata_unique== 0, na.rm = TRUE) != ncol(dNAdata_unique), ] 
+
+df=as.matrix(dNAdata1)
+group<-c(rep("1",2),rep("3",2))
+design<-model.matrix(~0+factor(group))
+colnames(design)<-c("NKXis1","NKXis2")
+rownames(design)<-colnames(df)
+contrast<-makeContrasts(NKXis2-NKXis1,levels = design)
+fit <- lmFit(df, design)
+fit2 <- contrasts.fit(fit,contrast)
+fit2<-eBayes(fit2)
+
+DEG <- topTable(fit2, coef="NKXis2 - NKXis1", number=Inf,sort.by = "logFC")
+DEG <- na.omit(DEG)
+colnames(DEG)
+
+DEG$regulate <- ifelse(DEG$P.Value > 0.05, "unchanged",
+                       ifelse(DEG$logFC > 0.585, "up-regulated",
+                              ifelse(DEG$logFC < -0.585, "down-regulated", "unchanged")))
+up_genes <- DEG[DEG$regulate == "up-regulated",]
+down_genes <- DEG[DEG$regulate == "down-regulated",]
+table(DEG$regulate)
+
+deg_table <- table(DEG$regulate)
+
+
+
+
+library(ggrepel)
+library(ggplot2)
+DEG$Genes <- rownames(DEG)
+DEG$FDR <- p.adjust(DEG$P.Value, method = "fdr")  
+
+head(DEG$P.Value)
+summary(DEG$P.Value)
+str(DEG$P.Value)
+
+DEG$adj_p <- p.adjust(DEG$P.Value, method = "fdr")
+options(digits = 10) 
+head(DEG[, c("P.Value", "adj_p")])
+
+
+volcano_plot <- ggplot(DEG, aes(x = logFC, y = -log10(adj.P.Val))) +   
+  geom_point(alpha = 0.7, size = 1.8, aes(color = regulate)) +   
+  ylab("-log10(adjusted pvalue)") + # y轴的说明  
+  scale_color_manual(values = c("#2f5688", "grey", "#cc0000")) + 
+  geom_vline(xintercept = c(-0.263, 0.263), lty = 4, col = "black", lwd = 0.8) + 
+  geom_hline(yintercept = -log10(0.05), lty = 4, col = "black", lwd = 0.8) +  
+  theme_bw() +   
+  theme(panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank()) + 
+  xlim(-3, 3) +  
+  ylim(0,2.2)+
+  ggtitle("sgKDM6A DIA")
+
+up_data <- filter(DEG, regulate == 'up-regulated') %>% 
+  top_n(7, -log10(adj.P.Val))                           
+
+
+down_data <- filter(DEG, regulate == 'down-regulated') %>%  
+  top_n(7, -log10(adj.P.Val))                               
+
+p1 <- volcano_plot +  
+  geom_text_repel(data = up_data, aes(x = logFC, y = -log10(adj.P.Val), label = gene), max.overlaps = 20) +  # 添加上调基因的标签
+  geom_text_repel(data = down_data, aes(x = logFC, y = -log10(adj.P.Val), label = gene), max.overlaps = 20)# 添加下调基因的标签
+p1
+
+
+library("org.Hs.eg.db")
+library(ggplot2)
+library(enrichplot)
+library(clusterProfiler)
+
+setwd("E:/2025227atacgalaxy/DIA数据分析这块")
+.libPaths("D:/研究生实验数据/R工作文件/R bag")
+info<- read.csv("KDM5C-293T up_regulated_proteins_1.2_0.05adj.csv",header = T,sep = ",")
+info<-na.omit(info)
+GO_database <- 'org.Hs.eg.db' 
+KEGG_database <- 'hsa' 
+#gene ID转换
+gene <- bitr(info$gene,fromType = 'SYMBOL',toType = 'ENTREZID',OrgDb = GO_database)
+KEGG<-enrichKEGG(gene$ENTREZID,
+                 organism = KEGG_database,
+                 pvalueCutoff = 1,
+                 qvalueCutoff = 1)
+
+
+ek2 = setReadable(KEGG, 
+                  OrgDb = "org.Hs.eg.db", 
+                  keyType = "ENTREZID") 
+head(ek2@result$geneID)
+write.table(ek2,file="KMT2B_up.txt",sep="\t",quote=F,row.names = F)
+write.xlsx(ek2, "kegg-RNAKDM5CUP的output.xlsx")
+
+barplot(KEGG, x = "GeneRatio", color = "p.adjust", 
+        showCategory =6) 
+
+library(tidyverse)
+ek.rt = read.table("KMT2B_up.txt",header=TRUE,sep="\t",quote = "")  
+ek.rt <- separate(data=ek.rt, col=GeneRatio, into = c("GR1", "GR2"), sep = "/") 
+
+ek.rt <- separate(data=ek.rt, col=BgRatio, into = c("BR1", "BR2"), sep = "/") 
+
+ek.rt <- mutate(ek.rt, enrichment_factor = (as.numeric(GR1)/as.numeric(GR2))/(as.numeric(BR1)/as.numeric(BR2))) 
+ek.rt10 <- ek.rt %>% filter(row_number() >= 1,row_number() <= 10)
+
+ek.rt10$Description
+
+p <- ggplot(ek.rt10,aes(enrichment_factor, fct_reorder(factor(Description), enrichment_factor))) + 
+  geom_point(aes(size=Count,color=-1*log10(qvalue))) +
+  scale_color_gradient(low="navyblue",high ="red") + 
+  labs(color=expression(-log[10](qvalue)),
+       x="Enrichment Factor",y="KEGG term",title="sgKMT2B_DIA_up KEGG enrichment") + 
+  theme_bw()+
+  theme(
+    axis.text.x = element_text(colour="black", size=10), 
+    axis.text.y = element_text(colour="black", size=10)     
+  )
+p
+
+ggsave("矫正pv值/KMT2B_up_dia_0.05fdr_kegg.pdf", plot = p, width =7, height = 4,dpi = 300)  
+
+
+
+
+##################VEnn analysis
+venn_dat <- read.csv(".csv", header = TRUE, sep = ",") 
+venn_list <- as.list(venn_dat)  
+venn_list <- purrr::map(venn_list, na.omit)   
+venn_list <- purrr::map(venn_list, function(x) { x[x != ""] })  
+a <- ggvenn(  
+  data = venn_list,         
+  columns = NULL,            
+  show_elements = FALSE,   
+  label_sep = "\n",         
+  show_percentage = FALSE,    
+  digits = 1,                 
+  fill_color = c("#A9C4E6","#D1392B", "#4FBF5B","orange"), 
+  fill_alpha = 0.5,         
+  stroke_color = "white",   
+  stroke_alpha = 0.5,       
+  stroke_size = 0.5,       
+  stroke_linetype = "solid", 
+  set_name_color = "black", 
+  set_name_size = 6,        
+  text_color = "black",    
+  text_size = 4            
+)  
+print(a)
+
+inter <- get.venn.partitions(venn_list)
+
+library(tidyr)  
+library(dplyr)  
+result_list <- list()  
+for (i in seq_len(nrow(inter))) {  
+  current_set_name <- inter[i, "..set.."]  
+  current_elements <- unlist(inter[[i, "..values.."]])  
+  result_list[[current_set_name]] <- current_elements  
+}  
+result_df <- as.data.frame(do.call(cbind, lapply(result_list, function(x) {  
+  if(length(x) > 0) {  
+    return(c(x, rep(NA, max(lengths(result_list)) - length(x))))  
+  } else {  
+    return(NA)  
+  }  
+})))  
+print(result_df)  
+filtered_df <- result_df %>%  
+  drop_na()  
+print(filtered_df)  
