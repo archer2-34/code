@@ -325,3 +325,204 @@ print(result_df)
 filtered_df <- result_df %>%  
   drop_na()  
 print(filtered_df)  
+
+
+####boxplot
+library(viridis)
+target_genes_directory <- "E:/2025227atacgalaxy/wjg/用fdr筛选/KDM5C/tF数据集/网上bed文件/前3000Tf靶基因"  
+expression_data_file <- "单独Tpm基因表达数据去掉.csv"      
+output_directory <- "前1500Tf表达数据"              # 输出结果文件夹路径  
+
+if (!dir.exists(output_directory)) {  
+  dir.create(output_directory)  
+}  
+
+
+target_files <- list.files(target_genes_directory, pattern = "\\.csv$", full.names = TRUE)  
+
+
+columns_to_keep <- c("gene","tpm_293t2","tpm_293t3","tpm_5C_1","tpm_5C_2")  
+
+
+for (target_file in target_files) {  
+  
+  target_data <- read.csv(target_file, header = TRUE)  
+  
+  colnames(target_data)[1] <- "gene"  
+  
+  expression_data <- read.csv(expression_data_file)  
+  
+  colnames(expression_data)[1] <- "gene"  
+  
+  extracted_data <- expression_data[expression_data$gene %in% target_data$gene, ]  
+  
+  result_data <- data.frame(gene = target_data$gene)  
+  result_data <- merge(result_data, extracted_data, by = "gene", all.x = TRUE)  
+  
+  result_data[is.na(result_data)] <- 0  
+  
+  final_output <- result_data[, columns_to_keep, drop = FALSE] 
+  
+  final_output <- final_output[match(target_data$gene, final_output$gene), , drop = FALSE]  
+  
+  cols_to_check <- 2:5  
+  rows_to_keep <- rowSums(final_output[, cols_to_check, drop = FALSE] == 0) < length(cols_to_check) - 1  
+  final_output <- final_output[rows_to_keep, , drop = FALSE]  
+  
+  
+  output_file_name <- file.path(output_directory, paste0("extracted_", basename(target_file)))  
+  
+
+  write.csv(final_output, output_file_name, row.names = FALSE)  
+  cat("从文件", basename(target_file), "生成的结果已存储至", output_file_name, "\n")  
+}  
+
+
+
+library(pheatmap)   
+library(readr)        
+library(dplyr)       
+
+
+input_directory <- "前1500Tf表达数据"  # 输入的 CSV 文件夹路径  
+output_directory <- "结果图"     # 输出文件夹路径  
+
+
+if (!dir.exists(output_directory)) {  
+  dir.create(output_directory)  
+}  
+
+
+csv_files <- list.files(input_directory, pattern = "\\.csv$", full.names = TRUE)  
+
+
+for (csv_file in csv_files) {  
+
+  data <- read.csv(csv_file, header = TRUE, row.names = 1)  # 假设第一列为行名称  
+  
+ 
+  data <- data[rowSums(data) != 0, ]  
+  
+
+  pdf_file_name <- paste0(output_directory, "/", tools::file_path_sans_ext(basename(csv_file)), "_heatmap.pdf")  
+  
+ 
+  pdf(pdf_file_name)  
+  p<-pheatmap(data,scale="row",
+              border="white",  
+              cluster_cols = F, 
+              cluster_rows = T,
+              show_rownames = F, 
+              show_colnames = T)
+  print(p)
+  
+  dev.off()  
+  
+  cat("热图已保存至:", pdf_file_name, "\n")  
+}  
+
+library(dplyr)  
+library(readr)   
+library(tidyr)  
+
+input_directory <- "E:/2025227atacgalaxy/wjg/用fdr筛选/KDM5C/tF数据集/网上bed文件/前3000Tf靶基因/前3000Tf表达数据" 
+output_directory <- "E:/2025227atacgalaxy/wjg/用fdr筛选/KDM5C/tF数据集/网上bed文件/前3000Tf靶基因/前1500Tf表达数据平均"   
+
+  
+if (!dir.exists(output_directory)) {  
+  dir.create(output_directory)  
+}  
+
+
+csv_files <- list.files(input_directory, pattern = "\\.csv$", full.names = TRUE)  
+
+
+num_rows <-1500   
+
+for (csv_file in csv_files) {  
+  
+  data <- read.csv(csv_file, header = TRUE)  
+  
+ 
+  data <- head(data, num_rows)  
+  
+  
+  result_data <- data %>%  
+    mutate(  
+      Avg_Group1 = rowMeans(select(., 2:3), na.rm = TRUE),    
+      Avg_Group2 = rowMeans(select(., 4:5), na.rm = TRUE)     
+    ) %>%  
+    select(GENE = 1, Avg_Group1, Avg_Group2) %>%  
+    rename(   
+      HEK293T = Avg_Group1,  
+      sgKDM5C = Avg_Group2  
+    )  
+  
+  
+  long_data <- result_data %>%  
+    pivot_longer(cols = c(HEK293T , sgKDM5C),   
+                 names_to = "Group",   
+                 values_to = "Average_Value")  
+  
+ 
+  output_file_name <- file.path(output_directory, paste0(tools::file_path_sans_ext(basename(csv_file)), "_processed.csv"))  
+  
+ 
+  write.csv(long_data, output_file_name, row.names = FALSE)  
+  
+  cat("处理完成，已保存至:", output_file_name, "\n")  
+}  
+
+
+
+ 
+input_directory <- "前1500Tf表达数据平均"  
+output_directory <- "配对箱线图" 
+
+
+if (!dir.exists(output_directory)) {  
+  dir.create(output_directory)  
+}  
+
+
+library(forcats)  
+library(ggplot2)
+library(forcats)
+library(ggpubr)
+
+
+csv_files <- list.files(input_directory, pattern = "\\.csv$", full.names = TRUE)  
+
+for (csv_file in csv_files) {  
+
+  df <- read.csv(csv_file, header = TRUE) 
+  df$Average_Value<-log(df$Average_Value+1)
+  df <- na.omit(df)  
+ 
+  df$group <- as.factor(df$Group)  
+  df$group <- fct_inorder(df$Group)  
+  
+ 
+  group_colors <- c('HEK293T' = '#A9C4E6', 'sgKMT2B' = '#D1392B',"sgKDM6A"="#2A5522","sgKDM5C"="#E07E35")  
+  
+  p <- ggplot(df, aes(x = Group, y = Average_Value)) +  
+    geom_boxplot(aes(color = Group), fill = NA, outlier.shape = NA, show.legend = FALSE, width = 0.6, size = 1.2) +  # 箱型图边缘线颜色和散点一致，填充透明  
+    stat_boxplot(geom = "boxplot", aes(color = Group), fill = NA, outlier.shape = NA, show.legend = FALSE, width = 0.6, size = 1.2, median.colour = "black") +  # 中位数线设为黑色  
+    scale_color_manual(values = group_colors) +  # 使用手动颜色映射  
+    geom_jitter(aes(color = Group), size = 0.1, position = position_jitter(width = 0.2, height = 0.2)) +  # 散点颜色与组一致  
+    scale_fill_manual(values = group_colors) +  # 确保散点颜色与箱型一致  
+    theme(panel.grid = element_blank(),   
+          axis.line = element_line(colour = 'black', size = 1),   
+          panel.background = element_blank(),   
+          plot.title = element_text(size = 15, hjust = 0.5),   
+          plot.subtitle = element_text(size = 15, hjust = 0.5),   
+          axis.text = element_text(size = 15, color = 'black'),   
+          axis.title = element_text(size = 15, color = 'black')) +  
+    labs(x = '', y = 'gene.expression', title = '') +  
+    stat_compare_means(method = "t.test", paired = TRUE, comparisons = list(c("HEK293T", "sgKDM5C")), label = "p.signif", label.y = max(df$Average_Value) * 1.1)  # 配对t检验，使用星号表示显著性   
+  
+
+  print(p)  
+
+  
+
